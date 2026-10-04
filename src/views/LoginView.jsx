@@ -95,6 +95,8 @@ export default function LoginView() {
                 <input
                   type="email"
                   required
+                  autoComplete="username"
+                  maxLength={254}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@texol.com"
@@ -115,6 +117,8 @@ export default function LoginView() {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   required
+                  autoComplete="current-password"
+                  maxLength={200}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"

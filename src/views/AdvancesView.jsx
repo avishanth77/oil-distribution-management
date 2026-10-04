@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { dataStore } from '../lib/dataStore';
+import { validateUpload, readFileAsDataUrl } from '../lib/uploadValidation';
 import Modal from '../components/Modal';
 
 export default function AdvancesView() {
@@ -95,19 +96,28 @@ export default function AdvancesView() {
     }
   };
 
-  const handleReceiptUpload = (e) => {
+  const handleReceiptUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
+    const check = validateUpload(file);
+    if (!check.ok) {
+      toastError(check.error);
+      e.target.value = '';
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
       setExpenseForm((prev) => ({
         ...prev,
         receipt_filename: file.name,
-        receipt_url: reader.result,
+        receipt_url: dataUrl,
       }));
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      toastError(err.message);
+    }
+    e.target.value = '';
   };
 
   const handleCreateExpense = async (e) => {
@@ -448,7 +458,7 @@ export default function AdvancesView() {
                           <a
                             href={exp.receipt_url}
                             target="_blank"
-                            rel="noreferrer"
+                            rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 text-[11px] font-label-code text-primary bg-surface-container-low px-2 py-0.5 rounded border border-outline-variant/40 hover:underline"
                           >
                             <span className="material-symbols-outlined text-[14px]">receipt</span>
@@ -649,7 +659,7 @@ export default function AdvancesView() {
             <label className="form-label font-medium text-[13px]">Upload Bill / Receipt Slip</label>
             <input
               type="file"
-              accept="image/*,.pdf"
+              accept=".jpg,.jpeg,.png,.webp,.heic,.pdf"
               onChange={handleReceiptUpload}
               className="text-[12px] file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-[12px] file:font-semibold file:bg-surface-container file:text-primary hover:file:bg-surface-container-high cursor-pointer"
             />

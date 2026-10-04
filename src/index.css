@@ -1,3 +1,42 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-primary: #00141f;
+  --color-primary-container: #0f2937;
+  --color-on-primary: #ffffff;
+  --color-secondary: #505f76;
+  --color-secondary-container: #d0e1fb;
+  --color-on-secondary: #ffffff;
+  --color-tertiary: #210d00;
+  --color-tertiary-container: #3f1e00;
+  --color-on-tertiary-container: #d67401;
+  --color-surface: #f9f9ff;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f1f3ff;
+  --color-surface-container: #e9edff;
+  --color-surface-container-high: #e1e8fd;
+  --color-surface-container-highest: #dce2f7;
+  --color-outline: #73787c;
+  --color-outline-variant: #c2c7cc;
+  --color-on-surface: #141b2b;
+  --color-on-surface-variant: #42474b;
+  --color-error: #ba1a1a;
+  --color-error-container: #ffdad6;
+
+  --font-headline-lg: 'IBM Plex Sans', sans-serif;
+  --font-headline-sm: 'IBM Plex Sans', sans-serif;
+  --font-title-lg: 'IBM Plex Sans', sans-serif;
+  --font-title-md: 'IBM Plex Sans', sans-serif;
+  --font-body-lg: 'IBM Plex Sans', sans-serif;
+  --font-body-md: 'IBM Plex Sans', sans-serif;
+  --font-body-sm: 'IBM Plex Sans', sans-serif;
+  --font-label-caps: 'IBM Plex Sans', sans-serif;
+  --font-metric-display: 'IBM Plex Sans', sans-serif;
+  --font-label-code: 'JetBrains Mono', monospace;
+}
+
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --bg-primary: #f9f9ff;
   --bg-secondary: #f1f3ff;

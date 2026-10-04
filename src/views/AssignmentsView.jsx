@@ -74,13 +74,16 @@ export default function AssignmentsView() {
   const allStations = dataStore.stations;
   const allVehicles = dataStore.vehicles || [];
   const foodAllowances = dataStore.foodAllowances || [];
-  const staffPasswords = dataStore.staffPasswords || {};
 
   // Handlers
   const handleCreateStaff = async (e) => {
     e.preventDefault();
     if (!staffForm.full_name || !staffForm.email) {
       toastError('Full name and email are mandatory.');
+      return;
+    }
+    if (!staffForm.initial_password || staffForm.initial_password.length < 8) {
+      toastError('An initial password of at least 8 characters is required.');
       return;
     }
 
@@ -90,14 +93,10 @@ export default function AssignmentsView() {
           full_name: staffForm.full_name,
           email: staffForm.email,
           phone: staffForm.phone,
+          initial_password: staffForm.initial_password,
         },
         currentUser
       );
-
-      // Save initial password if provided
-      if (staffForm.initial_password) {
-        await dataStore.resetStaffPassword(newStaff.id, staffForm.initial_password, currentUser);
-      }
 
       // Save food allowance
       await dataStore.setStaffFoodAllowance(
@@ -173,6 +172,10 @@ export default function AssignmentsView() {
       toastError('Passwords do not match.');
       return;
     }
+    if (passwordForm.new_password.length < 8) {
+      toastError('Password must be at least 8 characters long.');
+      return;
+    }
 
     try {
       await dataStore.resetStaffPassword(selectedStaff.id, passwordForm.new_password, currentUser);
@@ -185,10 +188,13 @@ export default function AssignmentsView() {
   };
 
   const generateRandomPassword = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+    // Cryptographically strong: Math.random() is not suitable for credentials.
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+    const bytes = new Uint32Array(16);
+    crypto.getRandomValues(bytes);
     let res = 'Petro@';
-    for (let i = 0; i < 4; i++) {
-      res += chars.charAt(Math.floor(Math.random() * chars.length));
+    for (let i = 0; i < 12; i++) {
+      res += alphabet.charAt(bytes[i] % alphabet.length);
     }
     setPasswordForm({ new_password: res, confirm_password: res });
   };
@@ -424,7 +430,6 @@ export default function AssignmentsView() {
               {staffProfiles.map((staff) => {
               const assignedVehicle = allVehicles.find((v) => v.assigned_driver_id === staff.id);
               const allowance = foodAllowances.find((f) => f.staff_id === staff.id);
-              const pwdInfo = staffPasswords[staff.id];
               const assignedRouteIds = dataStore.getAssignedRouteIds(staff.id);
               const assignedStationIds = dataStore.getAssignedStationIds(staff.id);
 
@@ -557,15 +562,17 @@ export default function AssignmentsView() {
 
                     <div>
                       <span className="font-label-caps text-[10px] text-secondary uppercase font-semibold block mb-1">
-                        Security Credentials
+                        Login Access
                       </span>
                       <div className="font-label-code text-[11px]">
-                        {pwdInfo ? (
-                          <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                            Reset {new Date(pwdInfo.reset_at).toLocaleDateString()}
+                        {staff.is_active === false ? (
+                          <span className="text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">
+                            Revoked
                           </span>
                         ) : (
-                          <span className="text-on-surface-variant">Default Password Active</span>
+                          <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                            Active
+                          </span>
                         )}
                       </div>
                     </div>
@@ -960,16 +967,19 @@ export default function AssignmentsView() {
           </div>
 
           <div className="form-group">
-            <label className="form-label font-medium text-[13px]">Initial Login Password</label>
+            <label className="form-label font-medium text-[13px]">Initial Login Password *</label>
             <input
-              type="text"
+              type="password"
+              autoComplete="new-password"
               className="form-input font-label-code"
-              placeholder="Temporary login password"
+              placeholder="Minimum 8 characters"
               value={staffForm.initial_password}
               onChange={(e) => setStaffForm({ ...staffForm, initial_password: e.target.value })}
+              required
+              minLength={8}
             />
             <span className="text-[11px] text-secondary mt-0.5 block">
-              You can also reset this password anytime later from the staff table.
+              At least 8 characters. Share it with the driver securely; you can reset it later from the staff table.
             </span>
           </div>
 
@@ -1119,25 +1129,32 @@ export default function AssignmentsView() {
           <div className="form-group">
             <label className="form-label font-medium text-[13px]">New Password *</label>
             <input
-              type="text"
+              type="password"
+              autoComplete="new-password"
               className="form-input font-label-code"
-              placeholder="Enter new password"
+              placeholder="Minimum 8 characters"
               value={passwordForm.new_password}
               onChange={(e) => setPasswordForm({ ...passwordForm, new_password: e.target.value })}
               required
+              minLength={8}
             />
           </div>
 
           <div className="form-group">
             <label className="form-label font-medium text-[13px]">Confirm New Password *</label>
             <input
-              type="text"
+              type="password"
+              autoComplete="new-password"
               className="form-input font-label-code"
               placeholder="Re-type new password"
               value={passwordForm.confirm_password}
               onChange={(e) => setPasswordForm({ ...passwordForm, confirm_password: e.target.value })}
               required
+              minLength={8}
             />
+            <span className="text-[11px] text-secondary mt-0.5 block">
+              Share the new password with the driver over a trusted channel.
+            </span>
           </div>
 
           <div className="flex justify-end gap-2 pt-3 border-t border-outline-variant/20">

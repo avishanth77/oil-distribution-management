@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabase.js';
+import { logError, logWarn } from './logger.js';
 import {
   INITIAL_PROFILES,
   INITIAL_ROUTES,
@@ -45,7 +46,7 @@ class DataStore {
       try {
         listener();
       } catch (e) {
-        console.error('DataStore listener error:', e);
+        logError('DataStore listener error:', e);
       }
     });
   }
@@ -80,12 +81,11 @@ class DataStore {
         this.vehicleConsumptions = parsed.vehicleConsumptions || INITIAL_VEHICLE_CONSUMPTIONS;
         this.everydayExpenses = parsed.everydayExpenses || INITIAL_EVERYDAY_EXPENSES;
         this.foodAllowances = parsed.foodAllowances || INITIAL_FOOD_ALLOWANCES;
-        this.staffPasswords = parsed.staffPasswords || {};
         this.financialSummaries = parsed.financialSummaries || [];
         return;
       }
     } catch (e) {
-      console.warn('Failed to parse persistent local state:', e);
+      logWarn('Failed to parse persistent local state:', e);
     }
 
     // Default clean slate
@@ -104,7 +104,6 @@ class DataStore {
     this.vehicleConsumptions = [...INITIAL_VEHICLE_CONSUMPTIONS];
     this.everydayExpenses = [...INITIAL_EVERYDAY_EXPENSES];
     this.foodAllowances = [...INITIAL_FOOD_ALLOWANCES];
-    this.staffPasswords = {};
     this.financialSummaries = [];
   }
 
@@ -128,12 +127,11 @@ class DataStore {
           vehicleConsumptions: this.vehicleConsumptions,
           everydayExpenses: this.everydayExpenses,
           foodAllowances: this.foodAllowances,
-          staffPasswords: this.staffPasswords,
           financialSummaries: this.financialSummaries,
         })
       );
     } catch (e) {
-      console.error('Failed to save state to localStorage', e);
+      logError('Failed to save state to localStorage', e);
     }
   }
 
@@ -153,13 +151,24 @@ class DataStore {
     this.vehicleConsumptions = [];
     this.everydayExpenses = [];
     this.foodAllowances = [];
-    this.staffPasswords = {};
     this.financialSummaries = [];
     this.saveLocalState();
     this.notify();
     if (isSupabaseConfigured && supabase) {
       this.fetchFromSupabase();
     }
+  }
+
+  // Wipe the locally cached dataset from the browser. Called on sign-out so
+  // customer PII, ledger rows and staff profiles do not survive a session on
+  // a shared device. Any previously persisted plaintext passwords go with it.
+  clearLocalCache() {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+      logWarn('Failed to clear local cache:', e);
+    }
+    this.resetToDefaults();
   }
 
   // =========================================================================
@@ -252,7 +261,7 @@ class DataStore {
       this.isLiveConnected = true;
       this.saveLocalState();
     } catch (err) {
-      console.error('Supabase query error:', err);
+      logError('Supabase query error:', err);
       this.lastError = err.message;
     } finally {
       this.isLoading = false;
@@ -284,7 +293,30 @@ class DataStore {
   }
 
   getFilteredData(currentUser) {
-    const isManager = !currentUser || currentUser.role === 'manager';
+    // No user means no data. Previously a null user was treated as a manager
+    // and received the entire dataset.
+    if (!currentUser) {
+      return {
+        routes: [],
+        stations: [],
+        customers: [],
+        products: [],
+        deliveries: [],
+        advances: [],
+        transactions: [],
+        vehicles: [],
+        factoryIntakes: [],
+        vehicleConsumptions: [],
+        everydayExpenses: [],
+        foodAllowances: [],
+        staffRouteAssignments: [],
+        staffStationAssignments: [],
+        profiles: [],
+        isManager: false,
+      };
+    }
+
+    const isManager = currentUser.role === 'manager';
 
     if (isManager) {
       return {
@@ -320,10 +352,14 @@ class DataStore {
     const customerIds = [...new Set(filteredStations.map((s) => s.customer_id))];
     const filteredCustomers = this.customers.filter((c) => customerIds.includes(c.id));
 
-    // Deliveries for assigned stations or driver
-    const filteredDeliveries = this.deliveries.filter((d) => 
-      assignedStationIds.includes(d.station_id) ||
-      (d.driver_name && d.driver_name.toLowerCase().includes((currentUser.full_name || '').toLowerCase()))
+    // Deliveries for assigned stations, or logged by this driver.
+    // Exact name match only: a substring match leaks other drivers' manifests,
+    // and an empty full_name made `includes('')` match every row.
+    const myName = (currentUser.full_name || '').trim().toLowerCase();
+    const filteredDeliveries = this.deliveries.filter(
+      (d) =>
+        assignedStationIds.includes(d.station_id) ||
+        (myName.length > 0 && d.driver_name?.trim().toLowerCase() === myName)
     );
 
     // Advances for assigned customers
@@ -335,8 +371,12 @@ class DataStore {
     );
 
     const filteredVehicles = this.vehicles.filter((v) => v.assigned_driver_id === currentUser.id);
-    const filteredFactoryIntakes = this.factoryIntakes.filter((f) => f.created_by === currentUser.id || f.driver_name === currentUser.full_name);
-    const filteredConsumptions = this.vehicleConsumptions.filter((c) => c.created_by === currentUser.id || c.driver_name === currentUser.full_name);
+    const filteredFactoryIntakes = this.factoryIntakes.filter(
+      (f) => f.created_by === currentUser.id || (myName.length > 0 && f.driver_name === currentUser.full_name)
+    );
+    const filteredConsumptions = this.vehicleConsumptions.filter(
+      (c) => c.created_by === currentUser.id || (myName.length > 0 && c.driver_name === currentUser.full_name)
+    );
     const filteredExpenses = this.everydayExpenses.filter((e) => e.spent_by_staff_id === currentUser.id);
     const filteredAllowances = this.foodAllowances.filter((f) => f.staff_id === currentUser.id);
 
@@ -355,7 +395,8 @@ class DataStore {
       foodAllowances: filteredAllowances,
       staffRouteAssignments: this.staffRouteAssignments.filter((a) => a.staff_id === currentUser.id),
       staffStationAssignments: this.staffStationAssignments.filter((a) => a.staff_id === currentUser.id),
-      profiles: this.profiles,
+      // Staff only ever see their own profile row, never the full directory.
+      profiles: this.profiles.filter((p) => p.id === currentUser.id),
       isManager: false,
     };
   }
@@ -497,7 +538,7 @@ class DataStore {
           return record;
         }
       } catch (err) {
-        console.warn('Supabase delivery sync caught:', err.message);
+        logWarn('Supabase delivery sync caught:', err.message);
       }
     }
 
@@ -571,7 +612,7 @@ class DataStore {
           return record;
         }
       } catch (err) {
-        console.warn('Supabase advance sync error:', err.message);
+        logWarn('Supabase advance sync error:', err.message);
       }
     }
 
@@ -581,7 +622,9 @@ class DataStore {
   // 3. Manager Confirmation & Approval of Advance (MANAGER ONLY)
   // Advance amount is added to customer balance ONLY upon this confirmation!
   async approveAdvance(advanceId, managerNotes, currentUser) {
-    const user = (currentUser || (managerNotes && typeof managerNotes === 'object' && managerNotes.role ? managerNotes : null));
+    // Authority comes exclusively from the caller's authenticated profile.
+    // It is never inferred from the free-text notes argument.
+    const user = currentUser;
     const notes = typeof managerNotes === 'string' ? managerNotes : 'Confirmed & Approved by Manager';
     this.assertManager(user);
 
@@ -638,7 +681,7 @@ class DataStore {
             .eq('id', customer.id);
         }
       } catch (err) {
-        console.warn('Supabase advance approve caught:', err.message);
+        logWarn('Supabase advance approve caught:', err.message);
       }
     }
 
@@ -674,7 +717,7 @@ class DataStore {
           })
           .eq('id', advanceId);
       } catch (err) {
-        console.warn('Supabase advance reject caught:', err.message);
+        logWarn('Supabase advance reject caught:', err.message);
       }
     }
 
@@ -741,7 +784,7 @@ class DataStore {
           .update({ outstanding_balance: customer.outstanding_balance })
           .eq('id', customer.id);
       } catch (err) {
-        console.warn('Supabase payment sync warning:', err.message);
+        logWarn('Supabase payment sync warning:', err.message);
       }
     }
 
@@ -798,7 +841,7 @@ class DataStore {
           },
         ]);
       } catch (err) {
-        console.warn('Supabase factory intake sync warning:', err.message);
+        logWarn('Supabase factory intake sync warning:', err.message);
       }
     }
 
@@ -841,7 +884,7 @@ class DataStore {
           },
         ]);
       } catch (err) {
-        console.warn('Supabase vehicle consumption sync warning:', err.message);
+        logWarn('Supabase vehicle consumption sync warning:', err.message);
       }
     }
 
@@ -889,7 +932,7 @@ class DataStore {
           },
         ]);
       } catch (err) {
-        console.warn('Supabase expense sync warning:', err.message);
+        logWarn('Supabase expense sync warning:', err.message);
       }
     }
 
@@ -965,7 +1008,7 @@ class DataStore {
           return this.customers[idx] || result.data;
         }
       } catch (err) {
-        console.warn('Supabase createCustomer caught:', err.message);
+        logWarn('Supabase createCustomer caught:', err.message);
       }
     }
 
@@ -1019,7 +1062,7 @@ class DataStore {
           this.notify();
         }
       } catch (err) {
-        console.warn('Supabase updateCustomer caught:', err.message);
+        logWarn('Supabase updateCustomer caught:', err.message);
       }
     }
 
@@ -1060,10 +1103,10 @@ class DataStore {
       try {
         const { error } = await supabase.from('customers').delete().eq('id', customerId);
         if (error) {
-          console.warn('Supabase deleteCustomer error:', error.message);
+          logWarn('Supabase deleteCustomer error:', error.message);
         }
       } catch (err) {
-        console.warn('Supabase deleteCustomer caught:', err.message);
+        logWarn('Supabase deleteCustomer caught:', err.message);
       }
     }
 
@@ -1103,7 +1146,7 @@ class DataStore {
           },
         ]);
       } catch (err) {
-        console.warn('Supabase vehicle insert warning:', err.message);
+        logWarn('Supabase vehicle insert warning:', err.message);
       }
     }
 
@@ -1127,76 +1170,83 @@ class DataStore {
           .update({ assigned_driver_id: driverId || null })
           .eq('id', vehicleId);
       } catch (err) {
-        console.warn('Supabase vehicle assign warning:', err.message);
+        logWarn('Supabase vehicle assign warning:', err.message);
       }
     }
   }
 
   // 13. Add Staff / Driver (MANAGER ONLY)
+  // The Auth account is created through the manage-staff Edge Function; the
+  // service-role key it uses never reaches the browser.
   async createStaff(staffData, currentUser) {
     this.assertManager(currentUser);
 
+    const email = staffData.email.trim().toLowerCase();
+    const full_name = staffData.full_name.trim();
+
+    if (!isSupabaseConfigured || !supabase) {
+      throw new Error('Creating staff accounts requires a configured Supabase connection.');
+    }
+
+    const { data, error } = await supabase.functions.invoke('manage-staff', {
+      body: {
+        action: 'create',
+        email,
+        full_name,
+        phone: staffData.phone?.trim() || null,
+        password: staffData.initial_password || '',
+      },
+    });
+
+    if (error) {
+      throw new Error(error.message || 'Could not create the staff login.');
+    }
+    if (!data?.success) {
+      throw new Error(data?.error || 'Could not create the staff login.');
+    }
+
     const newStaff = {
-      id: 'usr-stf-' + Date.now(),
-      full_name: staffData.full_name.trim(),
-      email: staffData.email.trim().toLowerCase(),
+      id: data.staff_id,
+      full_name,
+      email: data.email || email,
       phone: staffData.phone?.trim() || '',
       role: 'staff',
       is_active: true,
     };
 
-    this.profiles.push(newStaff);
+    if (!this.profiles.some((p) => p.id === newStaff.id)) {
+      this.profiles.push(newStaff);
+    }
     this.saveLocalState();
     this.notify();
-
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { data } = await supabase
-          .from('profiles')
-          .insert([
-            {
-              full_name: newStaff.full_name,
-              email: newStaff.email,
-              phone: newStaff.phone || null,
-              role: 'staff',
-              is_active: true,
-            },
-          ])
-          .select()
-          .single();
-
-        if (data) {
-          const idx = this.profiles.findIndex((p) => p.email === data.email);
-          if (idx !== -1) {
-            this.profiles[idx] = data;
-            this.saveLocalState();
-            this.notify();
-          }
-          await this.fetchFromSupabase();
-          return data;
-        }
-      } catch (err) {
-        console.warn('Supabase createStaff caught:', err.message);
-      }
-    }
+    await this.fetchFromSupabase();
 
     return newStaff;
   }
 
   // 14. Reset Staff Password (MANAGER ONLY)
+  // Handled by Supabase Auth via the manage-staff Edge Function. No password
+  // is ever written to local storage or to this object.
   async resetStaffPassword(staffId, newPassword, currentUser) {
     this.assertManager(currentUser);
     const staff = this.profiles.find((p) => p.id === staffId || p.email === staffId);
     const targetId = staff ? staff.id : staffId;
 
-    this.staffPasswords[targetId] = {
-      password: newPassword,
-      reset_at: new Date().toISOString(),
-      reset_by: currentUser?.full_name || 'Manager',
-    };
+    if (!isSupabaseConfigured || !supabase) {
+      throw new Error('Resetting staff passwords requires a configured Supabase connection.');
+    }
 
-    this.saveLocalState();
-    this.notify();
+    const { data, error } = await supabase.functions.invoke('manage-staff', {
+      body: { action: 'reset-password', staff_id: targetId, password: newPassword },
+    });
+
+    if (error) {
+      throw new Error(error.message || 'Could not reset the staff password.');
+    }
+    if (!data?.success) {
+      throw new Error(data?.error || 'Could not reset the staff password.');
+    }
+
     return true;
   }
 
@@ -1266,7 +1316,7 @@ class DataStore {
           return data;
         }
       } catch (err) {
-        console.warn('Supabase createRoute caught:', err.message);
+        logWarn('Supabase createRoute caught:', err.message);
       }
     }
 
@@ -1310,7 +1360,7 @@ class DataStore {
           this.notify();
         }
       } catch (err) {
-        console.warn('Supabase updateRoute caught:', err.message);
+        logWarn('Supabase updateRoute caught:', err.message);
       }
     }
 
@@ -1343,10 +1393,10 @@ class DataStore {
         await supabase.from('staff_route_assignments').delete().eq('route_id', routeId);
         const { error } = await supabase.from('distribution_routes').delete().eq('id', routeId);
         if (error) {
-          console.warn('Supabase deleteRoute error:', error.message);
+          logWarn('Supabase deleteRoute error:', error.message);
         }
       } catch (err) {
-        console.warn('Supabase deleteRoute caught:', err.message);
+        logWarn('Supabase deleteRoute caught:', err.message);
       }
     }
 
@@ -1403,7 +1453,7 @@ class DataStore {
           return data;
         }
       } catch (err) {
-        console.warn('Supabase createStation caught:', err.message);
+        logWarn('Supabase createStation caught:', err.message);
       }
     }
 
@@ -1454,7 +1504,7 @@ class DataStore {
           return data;
         }
       } catch (err) {
-        console.warn('Supabase createProduct caught:', err.message);
+        logWarn('Supabase createProduct caught:', err.message);
       }
     }
 
@@ -1492,7 +1542,7 @@ class DataStore {
         }
         await this.fetchFromSupabase();
       } catch (err) {
-        console.warn('Supabase staff route toggle caught:', err.message);
+        logWarn('Supabase staff route toggle caught:', err.message);
       }
     }
   }
@@ -1528,7 +1578,7 @@ class DataStore {
         }
         await this.fetchFromSupabase();
       } catch (err) {
-        console.warn('Supabase staff station toggle caught:', err.message);
+        logWarn('Supabase staff station toggle caught:', err.message);
       }
     }
   }
@@ -1585,7 +1635,6 @@ class DataStore {
     }
 
     this.profiles = this.profiles.filter((p) => p.id !== staff.id);
-    delete this.staffPasswords[staff.id];
     this.foodAllowances = this.foodAllowances.filter((f) => f.staff_id !== staff.id);
     this.staffRouteAssignments = this.staffRouteAssignments.filter((a) => a.staff_id !== staff.id);
     this.staffStationAssignments = this.staffStationAssignments.filter((a) => a.staff_id !== staff.id);
@@ -1595,19 +1644,25 @@ class DataStore {
     this.saveLocalState();
     this.notify();
 
+    // Removing the Auth user cascades to the profile row and revokes every
+    // outstanding JWT for that account. It must go through the service-role
+    // Edge Function, not the browser client.
     if (isSupabaseConfigured && supabase) {
-      try {
-        await supabase.from('staff_route_assignments').delete().eq('staff_id', staff.id);
-        await supabase.from('staff_station_assignments').delete().eq('staff_id', staff.id);
-        await supabase.from('staff_food_allowances').delete().eq('staff_id', staff.id);
-        await supabase.from('vehicles').update({ assigned_driver_id: null }).eq('assigned_driver_id', staff.id);
-        const { error } = await supabase.from('profiles').delete().eq('id', staff.id);
-        if (error) {
-          console.warn('Supabase deleteStaff error:', error.message);
-        }
-      } catch (err) {
-        console.warn('Supabase deleteStaff caught:', err.message);
+      const { data, error } = await supabase.functions.invoke('manage-staff', {
+        body: { action: 'delete', staff_id: staff.id },
+      });
+
+      if (error) {
+        await this.fetchFromSupabase();
+        throw new Error(error.message || 'Could not remove the staff login.');
       }
+      if (!data?.success) {
+        await this.fetchFromSupabase();
+        throw new Error(data?.error || 'Could not remove the staff login.');
+      }
+
+      await supabase.from('vehicles').update({ assigned_driver_id: null }).eq('assigned_driver_id', staff.id);
+      await this.fetchFromSupabase();
     }
 
     return staff;
@@ -1624,7 +1679,6 @@ class DataStore {
     }
 
     staff.is_active = Boolean(isActive);
-    if (!staff.is_active) delete this.staffPasswords[staff.id];
 
     this.saveLocalState();
     this.notify();
@@ -1636,10 +1690,10 @@ class DataStore {
           .update({ is_active: staff.is_active })
           .eq('id', staff.id);
         if (error) {
-          console.warn('Supabase setStaffActive error:', error.message);
+          logWarn('Supabase setStaffActive error:', error.message);
         }
       } catch (err) {
-        console.warn('Supabase setStaffActive caught:', err.message);
+        logWarn('Supabase setStaffActive caught:', err.message);
       }
     }
 
@@ -1663,10 +1717,10 @@ class DataStore {
       try {
         const { error } = await supabase.from('vehicles').delete().eq('id', vehicleId);
         if (error) {
-          console.warn('Supabase deleteVehicle error:', error.message);
+          logWarn('Supabase deleteVehicle error:', error.message);
         }
       } catch (err) {
-        console.warn('Supabase deleteVehicle caught:', err.message);
+        logWarn('Supabase deleteVehicle caught:', err.message);
       }
     }
 

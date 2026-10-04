@@ -1,19 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 
-const FALLBACK_URL = 'https://pzdvxixrknjobeekdoin.supabase.co';
-const FALLBACK_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InB6ZHZ4aXhya25qb2JlZWtkb2luIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA2NDcyMjEsImV4cCI6MjEwNjIyMzIyMX0.opLcoS5RPVFZkti2Om4QxuJadCvZ1XjuTE9p8dsgIGE';
+// Connection details come from the build environment only. They used to fall
+// back to a hardcoded project URL and anon key, which shipped the live anon
+// key to every visitor in the JavaScript bundle. Without configuration the
+// app now runs in offline mode instead.
+const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY || '';
 
-const rawUrl = (typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env.VITE_SUPABASE_URL : undefined;
-const rawKey = (typeof import.meta !== 'undefined' && import.meta.env) ? import.meta.env.VITE_SUPABASE_ANON_KEY : undefined;
-
-const supabaseUrl = (rawUrl && !rawUrl.includes('your-project')) ? rawUrl : FALLBACK_URL;
-const supabaseAnonKey = (rawKey && !rawKey.includes('your-anon-key')) ? rawKey : FALLBACK_KEY;
+const looksPlaceholder = (value) =>
+  !value || value.includes('your-project') || value.includes('your-anon-key');
 
 export const isSupabaseConfigured = Boolean(
-  supabaseUrl && 
-  supabaseAnonKey && 
-  !supabaseUrl.includes('your-project') &&
-  !supabaseAnonKey.includes('your-anon-key')
+  !looksPlaceholder(supabaseUrl) && !looksPlaceholder(supabaseAnonKey)
 );
 
 export const supabase = isSupabaseConfigured

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { dataStore } from '../lib/dataStore';
+import { validateUpload, readFileAsDataUrl } from '../lib/uploadValidation';
 import Modal from '../components/Modal';
 
 export default function DeliveriesView() {
@@ -75,19 +76,28 @@ export default function DeliveriesView() {
   const creditUsagePercent = creditLimit > 0 ? Math.min(100, Math.round((newProjectedLedger / creditLimit) * 100)) : 0;
 
   // File reader for Factory Invoice Upload
-  const handleInvoiceUpload = (e) => {
+  const handleInvoiceUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
+    const check = validateUpload(file);
+    if (!check.ok) {
+      toastError(check.error);
+      e.target.value = '';
+      return;
+    }
+
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
       setFactoryForm((prev) => ({
         ...prev,
         invoice_filename: file.name,
-        invoice_url: reader.result,
+        invoice_url: dataUrl,
       }));
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      toastError(err.message);
+    }
+    e.target.value = '';
   };
 
   const handleCreateProduct = async (e) => {
@@ -643,7 +653,7 @@ export default function DeliveriesView() {
                           <a
                             href={fi.invoice_url}
                             target="_blank"
-                            rel="noreferrer"
+                            rel="noopener noreferrer"
                             className="inline-flex items-center gap-1 text-[11px] font-label-code text-primary bg-surface-container-low px-2 py-0.5 rounded border border-outline-variant/40 hover:underline"
                           >
                             <span className="material-symbols-outlined text-[14px]">receipt_long</span>
@@ -1134,7 +1144,7 @@ export default function DeliveriesView() {
             <label className="form-label font-medium text-[13px]">Upload Factory Invoice / Weight Slip</label>
             <input
               type="file"
-              accept="image/*,.pdf"
+              accept=".jpg,.jpeg,.png,.webp,.heic,.pdf"
               onChange={handleInvoiceUpload}
               className="text-[12px] file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-[12px] file:font-semibold file:bg-surface-container file:text-primary hover:file:bg-surface-container-high cursor-pointer"
             />

@@ -1,7 +1,15 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { dataStore } from '../lib/dataStore';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
-import { INITIAL_PROFILES } from '../lib/mockData';
+import { logError, logWarn } from '../lib/logger';
+
+// Offline demo authentication exists only for local development with no
+// Supabase connection. It is stripped from production bundles and can never
+// authorise a login against a real deployment.
+const DEMO_AUTH_ENABLED = Boolean(import.meta.env?.DEV) && !isSupabaseConfigured;
+const DEMO_DEV_PASSWORD = 'local-dev-only';
+
+const AUTH_USER_KEY = 'petroflow_auth_user';
 
 const AuthContext = createContext();
 
@@ -33,20 +41,20 @@ export function AuthProvider({ children }) {
           const { data } = await supabase.auth.getSession();
           const sbSession = data?.session;
           if (sbSession?.user) {
-            setSession(sbSession);
-            const profile = findProfileForUser(sbSession.user, dataStore.profiles);
+            const profile = await resolveProfile(sbSession.user);
             if (profile && mounted) {
               if (profile.is_active === false) {
                 await supabase.auth.signOut();
-                localStorage.removeItem('petroflow_auth_user');
+                localStorage.removeItem(AUTH_USER_KEY);
                 localStorage.removeItem('petroflow_active_user');
                 setSession(null);
                 setAuthError('This account has been deactivated. Please contact your Operations Manager.');
                 setIsLoading(false);
                 return;
               }
+              setSession(sbSession);
               setCurrentUser(profile);
-              localStorage.setItem('petroflow_auth_user', JSON.stringify(profile));
+              localStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
               setIsLoading(false);
               return;
             }
@@ -56,23 +64,29 @@ export function AuthProvider({ children }) {
           supabase.auth.onAuthStateChange(async (event, newSession) => {
             if (!mounted) return;
             if (newSession?.user) {
-              setSession(newSession);
-              const p = findProfileForUser(newSession.user, dataStore.profiles);
-              if (p) {
-                setCurrentUser(p);
-                localStorage.setItem('petroflow_auth_user', JSON.stringify(p));
+              const p = await resolveProfile(newSession.user);
+              if (p?.is_active === false) {
+                await supabase.auth.signOut();
+                setSession(null);
+                setCurrentUser(null);
+                localStorage.removeItem(AUTH_USER_KEY);
+                localStorage.removeItem('petroflow_active_user');
+                return;
               }
+              setSession(newSession);
+              setCurrentUser(p);
+              localStorage.setItem(AUTH_USER_KEY, JSON.stringify(p));
             } else if (event === 'SIGNED_OUT') {
               setSession(null);
               setCurrentUser(null);
-              localStorage.removeItem('petroflow_auth_user');
+              localStorage.removeItem(AUTH_USER_KEY);
               localStorage.removeItem('petroflow_active_user');
             }
           });
         }
 
         // 2. Check local stored user session
-        const storedUser = localStorage.getItem('petroflow_auth_user');
+        const storedUser = localStorage.getItem(AUTH_USER_KEY);
         if (storedUser) {
           try {
             const parsed = JSON.parse(storedUser);
@@ -82,7 +96,7 @@ export function AuthProvider({ children }) {
             );
             if (matched && mounted) {
               if (matched.is_active === false) {
-                localStorage.removeItem('petroflow_auth_user');
+                localStorage.removeItem(AUTH_USER_KEY);
                 localStorage.removeItem('petroflow_active_user');
                 setAuthError('This account has been deactivated. Please contact your Operations Manager.');
                 setIsLoading(false);
@@ -91,17 +105,18 @@ export function AuthProvider({ children }) {
               setCurrentUser(matched);
               setIsLoading(false);
               return;
-            } else if (parsed && mounted) {
+            } else if (parsed && mounted && DEMO_AUTH_ENABLED) {
+              // Offline demo identity is trusted only in local dev builds.
               setCurrentUser(parsed);
               setIsLoading(false);
               return;
             }
           } catch (e) {
-            console.warn('Failed to parse petroflow_auth_user:', e);
+            logWarn('Failed to parse stored auth user:', e);
           }
         }
       } catch (err) {
-        console.error('Error during auth initialization:', err);
+        logError('Error during auth initialization:', err);
       } finally {
         if (mounted) setIsLoading(false);
       }
@@ -114,25 +129,35 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  // Helper to match Supabase user to local or cloud profile
-  function findProfileForUser(sbUser, availableProfiles) {
+  // Resolve the authoritative profile for a signed-in Supabase user.
+  // Role and activation state always come from the profiles row, never from
+  // attacker-controllable auth metadata (user_metadata) or the email string.
+  async function resolveProfile(sbUser) {
     if (!sbUser) return null;
-    const byEmail = availableProfiles.find(
-      (p) => p.email?.toLowerCase() === sbUser.email?.toLowerCase()
-    );
-    if (byEmail) return byEmail;
 
-    const byId = availableProfiles.find((p) => p.id === sbUser.id);
-    if (byId) return byId;
+    const local = dataStore.profiles.find((p) => p.id === sbUser.id);
+    if (local) return local;
 
-    // Synthesize profile from user metadata if not yet created in dataStore
-    const userRole = sbUser.user_metadata?.role || (sbUser.email?.includes('manager') ? 'manager' : 'staff');
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data: dbProfile, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', sbUser.id)
+          .single();
+        if (!error && dbProfile) return dbProfile;
+      } catch (err) {
+        logWarn('Profile lookup failed:', err.message);
+      }
+    }
+
+    // No profile row yet: default to the least-privileged staff role.
     return {
       id: sbUser.id,
       email: sbUser.email,
       full_name: sbUser.user_metadata?.full_name || sbUser.email?.split('@')[0] || 'User',
-      role: userRole,
-      phone: sbUser.user_metadata?.phone || '+91 98000 00000',
+      role: 'staff',
+      phone: sbUser.user_metadata?.phone || null,
       is_active: true,
     };
   }
@@ -141,135 +166,62 @@ export function AuthProvider({ children }) {
   const isStaff = Boolean(currentUser && currentUser.role === 'staff');
   const isAuthenticated = Boolean(currentUser);
 
-  // Sign In function supporting Supabase Auth + Demo fallbacks
+  // Sign in through Supabase Auth. The offline demo identity path is only
+  // reachable in local development builds (see DEMO_AUTH_ENABLED).
   const login = async ({ email, password }) => {
     setAuthError(null);
     if (!email || !password) {
       throw new Error('Please enter both email and password.');
     }
 
-    let input = (email || '').trim().toLowerCase();
+    const input = (email || '').trim().toLowerCase();
     const cleanPassword = (password || '').trim();
 
-    // Support common manager aliases
-    if (input === 'manager' || input === 'admin' || input === 'operations manager' || input === 'oilmanager') {
-      input = 'manager@texol.com';
-    }
-
-    // 1. Attempt Supabase Auth if client is configured
     if (isSupabaseConfigured && supabase) {
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email: input,
-          password: cleanPassword,
-        });
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: input,
+        password: cleanPassword,
+      });
 
-        if (!error && data?.user) {
-          setSession(data.session);
-          let profile = findProfileForUser(data.user, dataStore.profiles);
+      if (error) {
+        throw new Error('Invalid email or password. Please check your credentials or contact an administrator.');
+      }
 
-          if (!profile) {
-            try {
-              const { data: dbProfile } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', data.user.id)
-                .single();
-              if (dbProfile) profile = dbProfile;
-            } catch {
-              // Ignore if profile lookup fails
-            }
-          }
+      if (data?.user) {
+        const profile = await resolveProfile(data.user);
 
-          if (!profile) {
-            profile = {
-              id: data.user.id,
-              email: data.user.email,
-              full_name: data.user.user_metadata?.full_name || input.split('@')[0],
-              role: data.user.user_metadata?.role || (input.includes('manager') ? 'manager' : 'staff'),
-              is_active: true,
-            };
-          }
-
-          if (profile.is_active === false) {
-            const deactivated = 'This account has been deactivated. Please contact your Operations Manager.';
-            await supabase.auth.signOut();
-            setAuthError(deactivated);
-            throw new Error(deactivated);
-          }
-
-          setCurrentUser(profile);
-          localStorage.setItem('petroflow_auth_user', JSON.stringify(profile));
-          return { success: true, user: profile };
+        if (profile?.is_active === false) {
+          await supabase.auth.signOut();
+          const deactivated =
+            'This account has been deactivated. Please contact your Operations Manager.';
+          setAuthError(deactivated);
+          throw new Error(deactivated);
         }
-      } catch (sbErr) {
-        if (sbErr.message?.startsWith('This account has been deactivated')) throw sbErr;
-        console.warn('Supabase signIn notice:', sbErr.message);
+
+        setSession(data.session);
+        setCurrentUser(profile);
+        localStorage.setItem(AUTH_USER_KEY, JSON.stringify(profile));
+        return { success: true, user: profile };
       }
     }
 
-    // 2. Search dataStore.profiles by email OR full_name
-    let matchedProfile = dataStore.profiles.find(
-      (p) => p.email?.toLowerCase() === input || p.full_name?.toLowerCase() === input
-    );
+    // Offline demo identity. Compiled out of production bundles entirely
+    // (requires import.meta.env.DEV) and only reachable when no Supabase
+    // connection is configured, so it can never authorise a real login.
+    if (DEMO_AUTH_ENABLED) {
+      const matchedProfile = dataStore.profiles.find((p) => p.email?.toLowerCase() === input);
 
-    // If not found in dataStore.profiles, check INITIAL_PROFILES directly
-    if (!matchedProfile) {
-      matchedProfile = INITIAL_PROFILES.find(
-        (p) => p.email?.toLowerCase() === input || p.full_name?.toLowerCase() === input
-      );
-      if (matchedProfile) {
-        dataStore.profiles.push(matchedProfile);
-      }
-    }
-
-    // Also support any Supabase profile matched by username/email prefix
-    if (!matchedProfile) {
-      matchedProfile = dataStore.profiles.find(
-        (p) => p.email?.toLowerCase().startsWith(input)
-      );
-    }
-
-    if (matchedProfile) {
-      if (matchedProfile.is_active === false) {
-        const deactivated = 'This account has been deactivated. Please contact your Operations Manager.';
-        setAuthError(deactivated);
-        throw new Error(deactivated);
+      if (matchedProfile && matchedProfile.is_active !== false) {
+        if (DEMO_DEV_PASSWORD === cleanPassword) {
+          setCurrentUser(matchedProfile);
+          localStorage.setItem(AUTH_USER_KEY, JSON.stringify(matchedProfile));
+          return { success: true, user: matchedProfile };
+        }
       }
 
-      const savedPw = dataStore.staffPasswords?.[matchedProfile.id]?.password;
-      const isManagerAccount = matchedProfile.role === 'manager';
-
-      const isManagerMatch =
-        isManagerAccount &&
-        ['manager123', 'admin', 'admin123', 'manager', 'texol2026'].includes(cleanPassword);
-
-      const isCustomMatch = savedPw && savedPw === cleanPassword;
-
-      if (isManagerMatch || isCustomMatch) {
-        setCurrentUser(matchedProfile);
-        localStorage.setItem('petroflow_auth_user', JSON.stringify(matchedProfile));
-        return { success: true, user: matchedProfile };
-      } else {
-        const msg = 'Invalid email or password. Please check your credentials or contact an administrator.';
-        setAuthError(msg);
-        throw new Error(msg);
-      }
-    }
-
-    // Fallback: Operations Manager login
-    if (input === 'manager@texol.com' && ['manager123', 'admin', 'admin123', 'texol2026'].includes(cleanPassword)) {
-      const defaultManager = {
-        id: 'usr-mgr-1',
-        email: 'manager@texol.com',
-        full_name: 'Operations Manager',
-        role: 'manager',
-        phone: '+91 98200 99001',
-        is_active: true,
-      };
-      setCurrentUser(defaultManager);
-      localStorage.setItem('petroflow_auth_user', JSON.stringify(defaultManager));
-      return { success: true, user: defaultManager };
+      const notFound = 'Invalid email or password. Please check your credentials or contact an administrator.';
+      setAuthError(notFound);
+      throw new Error(notFound);
     }
 
     const notFound = 'Invalid email or password. Please check your credentials or contact an administrator.';
@@ -277,69 +229,73 @@ export function AuthProvider({ children }) {
     throw new Error(notFound);
   };
 
-  // Sign Up / Register new account
-  const signUp = async ({ email, password, full_name, role = 'staff', phone = '' }) => {
+  // Staff self-registration. Always creates a 'staff' account: the requested
+  // role is intentionally discarded because user_metadata is attacker
+  // controlled and was previously copied straight into profiles.role.
+  const signUp = async ({ email, password, full_name, phone = '' }) => {
     setAuthError(null);
-    const cleanEmail = email.trim().toLowerCase();
 
+    if (!email || !password || !full_name) {
+      throw new Error('Full name, email, and password are required.');
+    }
+    if (String(password).length < 8) {
+      throw new Error('Password must be at least 8 characters long.');
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
     let newProfile = null;
 
     if (isSupabaseConfigured && supabase) {
-      try {
-        const { data, error } = await supabase.auth.signUp({
-          email: cleanEmail,
-          password,
-          options: {
-            data: { full_name, role, phone },
-          },
-        });
-        if (error) throw error;
-        if (data?.user) {
-          newProfile = {
-            id: data.user.id,
-            email: cleanEmail,
-            full_name,
-            role,
-            phone,
-            is_active: true,
-          };
-        }
-      } catch (err) {
-        console.warn('Supabase signUp warning:', err.message);
+      const { data, error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password,
+        options: {
+          data: { full_name, phone },
+        },
+      });
+      if (error) throw error;
+      if (data?.user) {
+        newProfile = await resolveProfile(data.user);
       }
     }
 
-    if (!newProfile) {
+    // Offline demo registration. Never stores the password and never mints a
+    // manager; unavailable in production builds.
+    if (!newProfile && DEMO_AUTH_ENABLED) {
       newProfile = {
-        id: 'usr-' + (role === 'manager' ? 'mgr-' : 'stf-') + Date.now(),
+        id: 'usr-stf-' + Date.now(),
         email: cleanEmail,
         full_name,
-        role,
+        role: 'staff',
         phone,
         is_active: true,
       };
       dataStore.profiles.push(newProfile);
-      if (!dataStore.staffPasswords) dataStore.staffPasswords = {};
-      dataStore.staffPasswords[newProfile.id] = { password };
       dataStore.saveLocalState();
       dataStore.notify();
     }
 
+    if (!newProfile) {
+      throw new Error('Registration is unavailable. Please ask an Operations Manager to create your account.');
+    }
+
     setCurrentUser(newProfile);
-    localStorage.setItem('petroflow_auth_user', JSON.stringify(newProfile));
+    localStorage.setItem(AUTH_USER_KEY, JSON.stringify(newProfile));
     return { success: true, user: newProfile };
   };
 
-  // Sign out and clear active session
+  // Sign out: clear the session and the locally cached dataset so no
+  // customer, ledger, or profile data survives on a shared device.
   const logout = async () => {
     if (isSupabaseConfigured && supabase) {
       try {
         await supabase.auth.signOut();
       } catch (err) {
-        console.warn('Supabase signOut warning:', err);
+        logWarn('Supabase signOut warning:', err);
       }
     }
-    localStorage.removeItem('petroflow_auth_user');
+    dataStore.clearLocalCache();
+    localStorage.removeItem(AUTH_USER_KEY);
     localStorage.removeItem('petroflow_active_user');
     setCurrentUser(null);
     setSession(null);
