@@ -36,6 +36,15 @@ export function AuthProvider({ children }) {
             setSession(sbSession);
             const profile = findProfileForUser(sbSession.user, dataStore.profiles);
             if (profile && mounted) {
+              if (profile.is_active === false) {
+                await supabase.auth.signOut();
+                localStorage.removeItem('petroflow_auth_user');
+                localStorage.removeItem('petroflow_active_user');
+                setSession(null);
+                setAuthError('This account has been deactivated. Please contact your Operations Manager.');
+                setIsLoading(false);
+                return;
+              }
               setCurrentUser(profile);
               localStorage.setItem('petroflow_auth_user', JSON.stringify(profile));
               setIsLoading(false);
@@ -72,6 +81,13 @@ export function AuthProvider({ children }) {
               (p) => p.id === parsed.id || p.email?.toLowerCase() === parsed.email?.toLowerCase()
             );
             if (matched && mounted) {
+              if (matched.is_active === false) {
+                localStorage.removeItem('petroflow_auth_user');
+                localStorage.removeItem('petroflow_active_user');
+                setAuthError('This account has been deactivated. Please contact your Operations Manager.');
+                setIsLoading(false);
+                return;
+              }
               setCurrentUser(matched);
               setIsLoading(false);
               return;
@@ -175,11 +191,19 @@ export function AuthProvider({ children }) {
             };
           }
 
+          if (profile.is_active === false) {
+            const deactivated = 'This account has been deactivated. Please contact your Operations Manager.';
+            await supabase.auth.signOut();
+            setAuthError(deactivated);
+            throw new Error(deactivated);
+          }
+
           setCurrentUser(profile);
           localStorage.setItem('petroflow_auth_user', JSON.stringify(profile));
           return { success: true, user: profile };
         }
       } catch (sbErr) {
+        if (sbErr.message?.startsWith('This account has been deactivated')) throw sbErr;
         console.warn('Supabase signIn notice:', sbErr.message);
       }
     }
@@ -207,6 +231,12 @@ export function AuthProvider({ children }) {
     }
 
     if (matchedProfile) {
+      if (matchedProfile.is_active === false) {
+        const deactivated = 'This account has been deactivated. Please contact your Operations Manager.';
+        setAuthError(deactivated);
+        throw new Error(deactivated);
+      }
+
       const savedPw = dataStore.staffPasswords?.[matchedProfile.id]?.password;
       const isManagerAccount = matchedProfile.role === 'manager';
 

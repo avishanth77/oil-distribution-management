@@ -1532,6 +1532,146 @@ class DataStore {
       }
     }
   }
+
+  // 21. Count historical records that block a hard delete of a staff profile.
+  // Locally created rows and Supabase rows use different owner column names,
+  // so every known variant is checked.
+  getStaffHistoryCount(staffId) {
+    const staff = this.profiles.find((p) => p.id === staffId);
+    const owned = (row, fields) => fields.some((f) => row[f] === staffId);
+    const driverMatch = (row) =>
+      Boolean(staff?.full_name) && row.driver_name === staff.full_name;
+
+    return (
+      this.deliveries.filter(
+        (d) => owned(d, ['delivered_by', 'created_by', 'recorded_by']) || driverMatch(d)
+      ).length +
+      this.advances.filter((a) => owned(a, ['requested_by', 'reviewed_by'])).length +
+      this.transactions.filter((t) => owned(t, ['recorded_by', 'created_by'])).length +
+      this.everydayExpenses.filter(
+        (e) => owned(e, ['spent_by_staff_id', 'approved_by', 'recorded_by']) || driverMatch(e)
+      ).length +
+      this.factoryIntakes.filter(
+        (f) => owned(f, ['recorded_by', 'created_by']) || driverMatch(f)
+      ).length +
+      this.vehicleConsumptions.filter(
+        (c) => owned(c, ['recorded_by', 'created_by']) || driverMatch(c)
+      ).length
+    );
+  }
+
+  // 22. Delete Staff / Driver (MANAGER ONLY)
+  // Hard delete is blocked once the profile owns historical records, since
+  // deliveries/advances/transactions reference profiles with ON DELETE RESTRICT.
+  // Use deactivateStaff() to revoke access while preserving history.
+  async deleteStaff(staffId, currentUser) {
+    this.assertManager(currentUser);
+
+    const staff = this.profiles.find((p) => p.id === staffId || p.email === staffId);
+    if (!staff) throw new Error('Staff profile not found.');
+
+    if (staff.role === 'manager') {
+      throw new Error(`Cannot delete "${staff.full_name}": Operations Manager accounts cannot be removed from this screen.`);
+    }
+    if (currentUser.id === staff.id) {
+      throw new Error('Cannot delete your own account. Ask another Operations Manager to do this.');
+    }
+
+    const historyCount = this.getStaffHistoryCount(staff.id);
+    if (historyCount > 0) {
+      throw new Error(
+        `Cannot delete "${staff.full_name}": ${historyCount} historical record(s) are filed under this profile. Deactivate instead to revoke login access while keeping the delivery history intact.`
+      );
+    }
+
+    this.profiles = this.profiles.filter((p) => p.id !== staff.id);
+    delete this.staffPasswords[staff.id];
+    this.foodAllowances = this.foodAllowances.filter((f) => f.staff_id !== staff.id);
+    this.staffRouteAssignments = this.staffRouteAssignments.filter((a) => a.staff_id !== staff.id);
+    this.staffStationAssignments = this.staffStationAssignments.filter((a) => a.staff_id !== staff.id);
+    this.vehicles.forEach((v) => {
+      if (v.assigned_driver_id === staff.id) v.assigned_driver_id = null;
+    });
+    this.saveLocalState();
+    this.notify();
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.from('staff_route_assignments').delete().eq('staff_id', staff.id);
+        await supabase.from('staff_station_assignments').delete().eq('staff_id', staff.id);
+        await supabase.from('staff_food_allowances').delete().eq('staff_id', staff.id);
+        await supabase.from('vehicles').update({ assigned_driver_id: null }).eq('assigned_driver_id', staff.id);
+        const { error } = await supabase.from('profiles').delete().eq('id', staff.id);
+        if (error) {
+          console.warn('Supabase deleteStaff error:', error.message);
+        }
+      } catch (err) {
+        console.warn('Supabase deleteStaff caught:', err.message);
+      }
+    }
+
+    return staff;
+  }
+
+  // 23. Deactivate / Reactivate Staff (MANAGER ONLY)
+  async setStaffActive(staffId, isActive, currentUser) {
+    this.assertManager(currentUser);
+
+    const staff = this.profiles.find((p) => p.id === staffId || p.email === staffId);
+    if (!staff) throw new Error('Staff profile not found.');
+    if (staff.role === 'manager') {
+      throw new Error(`Cannot change active status of Operations Manager "${staff.full_name}".`);
+    }
+
+    staff.is_active = Boolean(isActive);
+    if (!staff.is_active) delete this.staffPasswords[staff.id];
+
+    this.saveLocalState();
+    this.notify();
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ is_active: staff.is_active })
+          .eq('id', staff.id);
+        if (error) {
+          console.warn('Supabase setStaffActive error:', error.message);
+        }
+      } catch (err) {
+        console.warn('Supabase setStaffActive caught:', err.message);
+      }
+    }
+
+    return staff;
+  }
+
+  // 24. Delete Fleet Vehicle (MANAGER ONLY)
+  // vehicle_id references use ON DELETE SET NULL on intakes/consumptions,
+  // so removing a tanker is always safe and never orphans history.
+  async deleteVehicle(vehicleId, currentUser) {
+    this.assertManager(currentUser);
+
+    const vehicle = this.vehicles.find((v) => v.id === vehicleId);
+    if (!vehicle) throw new Error('Vehicle not found.');
+
+    this.vehicles = this.vehicles.filter((v) => v.id !== vehicleId);
+    this.saveLocalState();
+    this.notify();
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { error } = await supabase.from('vehicles').delete().eq('id', vehicleId);
+        if (error) {
+          console.warn('Supabase deleteVehicle error:', error.message);
+        }
+      } catch (err) {
+        console.warn('Supabase deleteVehicle caught:', err.message);
+      }
+    }
+
+    return vehicle;
+  }
 }
 
 export const dataStore = new DataStore();

@@ -16,6 +16,8 @@ export default function AssignmentsView() {
   const [isVehicleModalOpen, setIsVehicleModalOpen] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [isFoodModalOpen, setIsFoodModalOpen] = useState(false);
+  const [staffPendingDelete, setStaffPendingDelete] = useState(null);
+  const [vehiclePendingDelete, setVehiclePendingDelete] = useState(null);
 
   // Selected entities for modals
   const [selectedStaff, setSelectedStaff] = useState(null);
@@ -67,6 +69,7 @@ export default function AssignmentsView() {
   }
 
   const staffProfiles = dataStore.profiles.filter((p) => p.role === 'staff');
+  const activeStaffProfiles = staffProfiles.filter((p) => p.is_active !== false);
   const allRoutes = dataStore.routes;
   const allStations = dataStore.stations;
   const allVehicles = dataStore.vehicles || [];
@@ -235,6 +238,51 @@ export default function AssignmentsView() {
     }
   };
 
+  const handleConfirmDeleteStaff = async () => {
+    if (!staffPendingDelete) return;
+    const target = staffPendingDelete;
+    try {
+      await dataStore.deleteStaff(target.id, currentUser);
+      setStaffPendingDelete(null);
+      triggerRefresh();
+      toastSuccess(`"${target.full_name}" removed from the carrier directory.`);
+    } catch (err) {
+      toastError(err.message);
+    }
+  };
+
+  const handleToggleStaffActive = async (staff) => {
+    const nextActive = staff.is_active === false;
+    try {
+      await dataStore.setStaffActive(staff.id, nextActive, currentUser);
+      triggerRefresh();
+      toastSuccess(
+        nextActive
+          ? `"${staff.full_name}" reactivated. Login access restored.`
+          : `"${staff.full_name}" deactivated. Login access revoked and credentials cleared.`
+      );
+    } catch (err) {
+      toastError(err.message);
+    }
+  };
+
+  const handleConfirmDeleteVehicle = async () => {
+    if (!vehiclePendingDelete) return;
+    const target = vehiclePendingDelete;
+    try {
+      await dataStore.deleteVehicle(target.id, currentUser);
+      setVehiclePendingDelete(null);
+      triggerRefresh();
+      toastSuccess(
+        target.assigned_driver_id
+          ? `Tanker ${target.plate_number} removed from fleet and unassigned from its driver.`
+          : `Tanker ${target.plate_number} removed from fleet.`
+      );
+    } catch (err) {
+      toastError(err.message);
+    }
+  };
+
   return (
     <div className="flex flex-col w-full">
       {/* Header & Sub-Navigation */}
@@ -383,7 +431,9 @@ export default function AssignmentsView() {
               return (
                 <div
                   key={staff.id}
-                  className="bg-surface-container-lowest border border-outline-variant/30 rounded p-5 shadow-sm hover:border-outline-variant transition-colors"
+                  className={`bg-surface-container-lowest border border-outline-variant/30 rounded p-5 shadow-sm transition-colors ${
+                    staff.is_active === false ? 'opacity-70 border-dashed' : 'hover:border-outline-variant'
+                  }`}
                 >
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-outline-variant/20">
                     <div className="flex items-center gap-3">
@@ -391,11 +441,17 @@ export default function AssignmentsView() {
                         <span className="material-symbols-outlined text-[22px]">person</span>
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <h4 className="font-title-lg text-[16px] font-bold text-primary">{staff.full_name}</h4>
                           <span className="font-label-code text-[10px] bg-sky-50 text-sky-800 border border-sky-200 px-1.5 py-0.5 rounded font-semibold uppercase">
                             Carrier Staff
                           </span>
+                          {staff.is_active === false && (
+                            <span className="font-label-code text-[10px] bg-rose-50 text-rose-800 border border-rose-200 px-1.5 py-0.5 rounded font-semibold uppercase inline-flex items-center gap-1">
+                              <span className="material-symbols-outlined text-[12px]">block</span>
+                              Deactivated
+                            </span>
+                          )}
                         </div>
                         <div className="font-label-code text-[12px] text-secondary flex items-center gap-3 mt-0.5">
                           <span>{staff.email}</span>
@@ -409,7 +465,8 @@ export default function AssignmentsView() {
                       <button
                         type="button"
                         onClick={() => openResetPasswordModal(staff)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-surface-container-low hover:bg-surface-container text-primary border border-outline-variant/30 text-[12px] font-medium transition-colors"
+                        disabled={staff.is_active === false}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-surface-container-low hover:bg-surface-container text-primary border border-outline-variant/30 text-[12px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-surface-container-low"
                         title="Reset Staff Login Password"
                       >
                         <span className="material-symbols-outlined text-[16px] text-amber-600">lock_reset</span>
@@ -424,6 +481,36 @@ export default function AssignmentsView() {
                       >
                         <span className="material-symbols-outlined text-[16px] text-emerald-600">restaurant</span>
                         <span>Configure Food</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleToggleStaffActive(staff)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded border text-[12px] font-medium transition-colors ${
+                          staff.is_active === false
+                            ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                            : 'bg-surface-container-low hover:bg-amber-50 text-on-surface-variant border-outline-variant/30'
+                        }`}
+                        title={
+                          staff.is_active === false
+                            ? 'Restore login access for this staff member'
+                            : 'Revoke login access without deleting history'
+                        }
+                      >
+                        <span className="material-symbols-outlined text-[16px]">
+                          {staff.is_active === false ? 'how_to_reg' : 'person_off'}
+                        </span>
+                        <span>{staff.is_active === false ? 'Reactivate' : 'Deactivate'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setStaffPendingDelete(staff)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-surface-container-low hover:bg-rose-50 text-on-surface-variant hover:text-rose-700 border border-outline-variant/30 hover:border-rose-300 text-[12px] font-medium transition-colors"
+                        title="Permanently remove this staff member"
+                      >
+                        <span className="material-symbols-outlined text-[16px] text-rose-600">delete</span>
+                        <span>Delete</span>
                       </button>
                     </div>
                   </div>
@@ -547,9 +634,20 @@ export default function AssignmentsView() {
                         </span>
                       </div>
 
-                      <span className="font-label-code text-[11px] text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                        PESO Compliant
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-label-code text-[11px] text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                          PESO Compliant
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setVehiclePendingDelete(veh)}
+                          className="w-7 h-7 rounded flex items-center justify-center text-secondary hover:text-rose-700 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-colors"
+                          title={`Remove tanker ${veh.plate_number} from fleet`}
+                          aria-label={`Delete vehicle ${veh.plate_number}`}
+                        >
+                          <span className="material-symbols-outlined text-[17px]">delete</span>
+                        </button>
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 text-[12px]">
@@ -582,11 +680,19 @@ export default function AssignmentsView() {
                           onChange={(e) => handleAssignVehicle(veh.id, e.target.value || null)}
                         >
                           <option value="">-- No Driver Assigned --</option>
-                          {staffProfiles.map((s) => (
+                          {activeStaffProfiles.map((s) => (
                             <option key={s.id} value={s.id}>
                               {s.full_name} ({s.email})
                             </option>
                           ))}
+                          {veh.assigned_driver_id &&
+                            !activeStaffProfiles.some((s) => s.id === veh.assigned_driver_id) && (
+                              <option value={veh.assigned_driver_id}>
+                                {staffProfiles.find((s) => s.id === veh.assigned_driver_id)?.full_name ||
+                                  'Deactivated driver'}{' '}
+                                (inactive)
+                              </option>
+                            )}
                         </select>
                       </div>
                       {assignedDriver && (
@@ -623,17 +729,17 @@ export default function AssignmentsView() {
             </span>
           </div>
 
-          {staffProfiles.length === 0 ? (
+          {activeStaffProfiles.length === 0 ? (
             <div className="bg-surface-container-lowest border border-outline-variant/30 rounded p-8 text-center shadow-sm">
               <span className="material-symbols-outlined text-4xl text-outline mb-2">lock_clock</span>
-              <h3 className="font-title-lg text-lg font-bold text-primary">No staff members for access clearance</h3>
+              <h3 className="font-title-lg text-lg font-bold text-primary">No active staff members for access clearance</h3>
               <p className="text-[13px] text-secondary mt-1 max-w-md mx-auto">
                 Corridor and station clearances are granted to carrier staff profiles. Register staff drivers to configure access permissions.
               </p>
             </div>
           ) : (
             <div className="space-y-4">
-              {staffProfiles.map((staff) => {
+              {activeStaffProfiles.map((staff) => {
                 const assignedRouteIds = dataStore.getAssignedRouteIds(staff.id);
                 const assignedStationIds = dataStore.getAssignedStationIds(staff.id);
 
@@ -762,7 +868,7 @@ export default function AssignmentsView() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/20 font-label-code text-[12px]">
-                {staffProfiles.map((staff) => {
+                {activeStaffProfiles.map((staff) => {
                   const allowance = foodAllowances.find((f) => f.staff_id === staff.id);
                   const assignedVehicle = allVehicles.find((v) => v.assigned_driver_id === staff.id);
 
@@ -802,7 +908,7 @@ export default function AssignmentsView() {
                     </tr>
                   );
                 })}
-                {staffProfiles.length === 0 && (
+                {activeStaffProfiles.length === 0 && (
                   <tr>
                     <td colSpan="6" className="text-center py-8 text-secondary font-body-md">
                       No staff members registered yet.
@@ -967,7 +1073,7 @@ export default function AssignmentsView() {
               onChange={(e) => setVehicleForm({ ...vehicleForm, assigned_driver_id: e.target.value })}
             >
               <option value="">-- Leave Unassigned for Pool --</option>
-              {staffProfiles.map((s) => (
+              {activeStaffProfiles.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.full_name} ({s.email})
                 </option>
@@ -1104,6 +1210,124 @@ export default function AssignmentsView() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* MODAL 5: CONFIRM DELETE STAFF */}
+      <Modal
+        isOpen={Boolean(staffPendingDelete)}
+        onClose={() => setStaffPendingDelete(null)}
+        title="Confirm Staff Removal"
+        maxWidth="470px"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-rose-50 border border-rose-200 rounded text-rose-900 text-[13px]">
+            <span className="material-symbols-outlined text-rose-600 text-[22px] shrink-0 mt-0.5">warning</span>
+            <div>
+              <p className="font-semibold text-rose-800">Permanent Staff Removal</p>
+              <p className="mt-0.5 text-rose-700 leading-relaxed">
+                Remove <strong className="text-rose-950 font-bold">{staffPendingDelete?.full_name}</strong> (
+                {staffPendingDelete?.email}) from the carrier directory?
+              </p>
+            </div>
+          </div>
+
+          {staffPendingDelete && dataStore.getStaffHistoryCount(staffPendingDelete.id) > 0 ? (
+            <div className="flex items-start gap-2.5 p-3 bg-amber-50 border border-amber-200 rounded text-amber-900 text-[12px]">
+              <span className="material-symbols-outlined text-[18px] text-amber-600 shrink-0 mt-0.5">lock</span>
+              <p className="leading-relaxed">
+                This profile owns{' '}
+                <strong className="font-bold">{dataStore.getStaffHistoryCount(staffPendingDelete.id)}</strong>{' '}
+                historical record(s) (deliveries, advances, or expenses) so it cannot be erased. Use{' '}
+                <strong className="font-bold">Deactivate</strong> instead to revoke login access while the history stays
+                intact.
+              </p>
+            </div>
+          ) : (
+            <p className="text-[12px] text-secondary leading-relaxed font-label-code">
+              This also removes their login credentials, daily allowance standard, and all route/station access
+              clearances. Any vehicle they drive will be returned to the unassigned pool.
+            </p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-outline-variant/30">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setStaffPendingDelete(null)}
+            >
+              Cancel
+            </button>
+            {staffPendingDelete && dataStore.getStaffHistoryCount(staffPendingDelete.id) > 0 ? (
+              <button
+                type="button"
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-[13px] font-semibold transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+                onClick={() => {
+                  const target = staffPendingDelete;
+                  setStaffPendingDelete(null);
+                  handleToggleStaffActive({ ...target, is_active: false });
+                }}
+              >
+                <span className="material-symbols-outlined text-[16px]">person_off</span>
+                <span>Deactivate Instead</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[13px] font-semibold transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+                onClick={handleConfirmDeleteStaff}
+              >
+                <span className="material-symbols-outlined text-[16px]">delete</span>
+                <span>Confirm Delete</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      {/* MODAL 6: CONFIRM DELETE VEHICLE */}
+      <Modal
+        isOpen={Boolean(vehiclePendingDelete)}
+        onClose={() => setVehiclePendingDelete(null)}
+        title="Confirm Tanker Removal"
+        maxWidth="470px"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 bg-rose-50 border border-rose-200 rounded text-rose-900 text-[13px]">
+            <span className="material-symbols-outlined text-rose-600 text-[22px] shrink-0 mt-0.5">warning</span>
+            <div>
+              <p className="font-semibold text-rose-800">Permanent Tanker Removal</p>
+              <p className="mt-0.5 text-rose-700 leading-relaxed">
+                Remove tanker{' '}
+                <strong className="text-rose-950 font-bold">{vehiclePendingDelete?.plate_number}</strong> (
+                {vehiclePendingDelete?.vehicle_type}) from the fleet register?
+              </p>
+            </div>
+          </div>
+
+          <p className="text-[12px] text-secondary leading-relaxed font-label-code">
+            {vehiclePendingDelete?.assigned_driver_id
+              ? 'This tanker is currently assigned to a driver and will be returned to the unassigned pool. Past factory intake and fuel consumption logs are preserved.'
+              : 'Past factory intake and fuel consumption logs are preserved for reporting.'}
+          </p>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-outline-variant/30">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setVehiclePendingDelete(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[13px] font-semibold transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+              onClick={handleConfirmDeleteVehicle}
+            >
+              <span className="material-symbols-outlined text-[16px]">delete</span>
+              <span>Confirm Delete</span>
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );
