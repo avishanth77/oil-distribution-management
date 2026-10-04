@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { dataStore } from '../lib/dataStore';
 import { isSupabaseConfigured } from '../lib/supabase';
 
-export default function Navbar({ onResetData, onToggleSidebar }) {
+export default function Navbar({ onToggleSidebar }) {
   const { currentUser, isManager, triggerRefresh, logout } = useAuth();
   const pendingAdvancesCount = dataStore.advances.filter((a) => a.status === 'pending').length;
 
@@ -56,19 +56,6 @@ export default function Navbar({ onResetData, onToggleSidebar }) {
 
       {/* Right: Actions, Notifications, User Identity & Sign Out */}
       <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
-        {/* Reset State Button (MANAGER ONLY) */}
-        {isManager && (
-          <button
-            type="button"
-            onClick={onResetData}
-            title="Reset system demo state (Operations Manager only)"
-            className="hidden xl:inline-flex items-center gap-1 px-2.5 py-1 rounded bg-surface-container-low hover:bg-rose-50 border border-outline-variant/30 hover:border-rose-200 text-on-surface-variant hover:text-rose-700 text-[11px] font-medium transition-colors"
-          >
-            <span className="material-symbols-outlined text-[14px]">restart_alt</span>
-            <span>Reset State</span>
-          </button>
-        )}
-
         {/* Sync Trigger */}
         <button
           onClick={triggerRefresh}

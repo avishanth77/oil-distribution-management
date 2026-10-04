@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { dataStore } from './lib/dataStore';
+import { ToastProvider } from './context/ToastContext';
 import Navbar from './components/Navbar';
 import Sidebar from './components/Sidebar';
 import DashboardView from './views/DashboardView';
@@ -16,18 +16,7 @@ import UnauthorizedView from './views/UnauthorizedView';
 function MainLayout() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const { triggerRefresh, dataVersion, isManager } = useAuth();
-
-  const handleResetData = () => {
-    if (!isManager) {
-      alert('Access Denied: Only Operations Managers can reset system state.');
-      return;
-    }
-    if (window.confirm('Reset all demo state back to default seed data?')) {
-      dataStore.resetToDefaults();
-      triggerRefresh();
-    }
-  };
+  const { dataVersion, isManager } = useAuth();
 
   return (
     <div className="min-h-screen bg-surface flex flex-col w-full overflow-x-hidden">
@@ -38,10 +27,7 @@ function MainLayout() {
         onClose={() => setIsSidebarOpen(false)}
       />
       <div className="lg:pl-64 pl-0 flex flex-col min-h-screen w-full min-w-0 transition-all duration-200">
-        <Navbar
-          onResetData={handleResetData}
-          onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)}
-        />
+        <Navbar onToggleSidebar={() => setIsSidebarOpen((prev) => !prev)} />
         <main
           className="w-full bg-surface px-3.5 sm:px-5 lg:px-6 pt-20 sm:pt-24 pb-8 sm:pb-12 flex-1 min-w-0"
           key={`${activeTab}-${dataVersion}`}
@@ -87,8 +73,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <ToastProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </ToastProvider>
   );
 }

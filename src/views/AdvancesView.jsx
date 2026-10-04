@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { dataStore } from '../lib/dataStore';
 import Modal from '../components/Modal';
 
 export default function AdvancesView() {
   const { currentUser, isManager, triggerRefresh } = useAuth();
+  const { error: toastError, success: toastSuccess } = useToast();
   const filteredData = dataStore.getFilteredData(currentUser);
 
   // Tabs: 'advances' | 'expenses'
@@ -42,7 +44,7 @@ export default function AdvancesView() {
 
   const handleOpenReview = (adv, action) => {
     if (!isManager) {
-      alert('Access Denied: Only Operations Managers can confirm and approve customer advances.');
+      toastError('Access Denied: Only Operations Managers can confirm and approve customer advances.');
       return;
     }
     setReviewAdvance(adv);
@@ -56,22 +58,22 @@ export default function AdvancesView() {
     try {
       if (reviewAction === 'approve') {
         await dataStore.approveAdvance(reviewAdvance.id, reviewNotes, currentUser);
-        alert(`Advance confirmed by Manager! The amount of ₹${Number(reviewAdvance.amount).toLocaleString('en-IN')} has now been credited to the customer's database ledger balance.`);
+        toastSuccess(`Advance confirmed by Manager! The amount of ₹${Number(reviewAdvance.amount).toLocaleString('en-IN')} has now been credited to the customer's database ledger balance.`);
       } else {
         await dataStore.rejectAdvance(reviewAdvance.id, reviewNotes, currentUser);
-        alert('Advance request rejected. Customer balance remains unaffected.');
+        toastSuccess('Advance request rejected. Customer balance remains unaffected.');
       }
       setReviewAdvance(null);
       triggerRefresh();
     } catch (err) {
-      alert('Failed to update advance: ' + err.message);
+      toastError('Failed to update advance: ' + err.message);
     }
   };
 
   const handleCreateAdvanceRequest = async (e) => {
     e.preventDefault();
     if (!requestData.customer_id || !requestData.amount || Number(requestData.amount) <= 0) {
-      alert('Please select a customer and specify a valid advance amount.');
+      toastError('Please select a customer and specify a valid advance amount.');
       return;
     }
 
@@ -87,9 +89,9 @@ export default function AdvancesView() {
         request_notes: '',
       });
       triggerRefresh();
-      alert('Customer advance request recorded as PENDING. It will be added to the customer database ledger once confirmed by the Operations Manager.');
+      toastSuccess('Customer advance request recorded as PENDING. It will be added to the customer database ledger once confirmed by the Operations Manager.');
     } catch (err) {
-      alert('Failed to submit advance: ' + err.message);
+      toastError('Failed to submit advance: ' + err.message);
     }
   };
 
@@ -111,7 +113,7 @@ export default function AdvancesView() {
   const handleCreateExpense = async (e) => {
     e.preventDefault();
     if (!expenseForm.amount || Number(expenseForm.amount) <= 0) {
-      alert('Please specify an expense amount.');
+      toastError('Please specify an expense amount.');
       return;
     }
 
@@ -128,9 +130,9 @@ export default function AdvancesView() {
         date: new Date().toISOString().slice(0, 10),
       });
       triggerRefresh();
-      alert('Everyday expense logged successfully!');
+      toastSuccess('Everyday expense logged successfully!');
     } catch (err) {
-      alert('Failed to log expense: ' + err.message);
+      toastError('Failed to log expense: ' + err.message);
     }
   };
 

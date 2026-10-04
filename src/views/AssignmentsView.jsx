@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { dataStore } from '../lib/dataStore';
 import Modal from '../components/Modal';
 
 export default function AssignmentsView() {
   const { currentUser, isManager, triggerRefresh } = useAuth();
+  const { error: toastError, success: toastSuccess } = useToast();
 
   // Active sub-tab
   const [activeSubTab, setActiveSubTab] = useState('staff'); // 'staff' | 'fleet' | 'corridors' | 'food'
@@ -46,13 +48,6 @@ export default function AssignmentsView() {
     daily_travel_allowance: 250,
   });
 
-  const [notification, setNotification] = useState(null);
-
-  const showNotification = (msg, type = 'success') => {
-    setNotification({ msg, type });
-    setTimeout(() => setNotification(null), 4000);
-  };
-
   // Restrict access if not a manager
   if (!isManager) {
     return (
@@ -82,7 +77,7 @@ export default function AssignmentsView() {
   const handleCreateStaff = async (e) => {
     e.preventDefault();
     if (!staffForm.full_name || !staffForm.email) {
-      alert('Full name and email are mandatory.');
+      toastError('Full name and email are mandatory.');
       return;
     }
 
@@ -119,16 +114,16 @@ export default function AssignmentsView() {
         daily_travel_allowance: 250,
       });
       triggerRefresh();
-      showNotification(`Staff member "${newStaff.full_name}" registered successfully.`);
+      toastSuccess(`Staff member "${newStaff.full_name}" registered successfully.`);
     } catch (err) {
-      alert('Error registering staff: ' + err.message);
+      toastError('Error registering staff: ' + err.message);
     }
   };
 
   const handleCreateVehicle = async (e) => {
     e.preventDefault();
     if (!vehicleForm.plate_number) {
-      alert('Vehicle registration plate number is required.');
+      toastError('Vehicle registration plate number is required.');
       return;
     }
 
@@ -143,9 +138,9 @@ export default function AssignmentsView() {
         assigned_driver_id: '',
       });
       triggerRefresh();
-      showNotification(`Vehicle "${newVeh.plate_number}" registered to fleet.`);
+      toastSuccess(`Vehicle "${newVeh.plate_number}" registered to fleet.`);
     } catch (err) {
-      alert('Error adding vehicle: ' + err.message);
+      toastError('Error adding vehicle: ' + err.message);
     }
   };
 
@@ -153,9 +148,9 @@ export default function AssignmentsView() {
     try {
       await dataStore.assignVehicle(vehicleId, driverId, currentUser);
       triggerRefresh();
-      showNotification('Vehicle assignment updated.');
+      toastSuccess('Vehicle assignment updated.');
     } catch (err) {
-      alert('Error assigning vehicle: ' + err.message);
+      toastError('Error assigning vehicle: ' + err.message);
     }
   };
 
@@ -168,11 +163,11 @@ export default function AssignmentsView() {
   const handleResetPassword = async (e) => {
     e.preventDefault();
     if (!passwordForm.new_password) {
-      alert('Please enter a new password.');
+      toastError('Please enter a new password.');
       return;
     }
     if (passwordForm.new_password !== passwordForm.confirm_password) {
-      alert('Passwords do not match.');
+      toastError('Passwords do not match.');
       return;
     }
 
@@ -180,9 +175,9 @@ export default function AssignmentsView() {
       await dataStore.resetStaffPassword(selectedStaff.id, passwordForm.new_password, currentUser);
       setIsPasswordModalOpen(false);
       triggerRefresh();
-      showNotification(`Password reset successfully for ${selectedStaff.full_name}.`);
+      toastSuccess(`Password reset successfully for ${selectedStaff.full_name}.`);
     } catch (err) {
-      alert('Failed to reset password: ' + err.message);
+      toastError('Failed to reset password: ' + err.message);
     }
   };
 
@@ -216,9 +211,9 @@ export default function AssignmentsView() {
       );
       setIsFoodModalOpen(false);
       triggerRefresh();
-      showNotification(`Daily allowance updated for ${selectedStaff.full_name}.`);
+      toastSuccess(`Daily allowance updated for ${selectedStaff.full_name}.`);
     } catch (err) {
-      alert('Failed to update food allowance: ' + err.message);
+      toastError('Failed to update food allowance: ' + err.message);
     }
   };
 
@@ -227,7 +222,7 @@ export default function AssignmentsView() {
       await dataStore.toggleStaffRouteAssignment(staffId, routeId, currentUser);
       triggerRefresh();
     } catch (err) {
-      alert('Failed to toggle corridor: ' + err.message);
+      toastError('Failed to toggle corridor: ' + err.message);
     }
   };
 
@@ -236,28 +231,12 @@ export default function AssignmentsView() {
       await dataStore.toggleStaffStationAssignment(staffId, stationId, currentUser);
       triggerRefresh();
     } catch (err) {
-      alert('Failed to toggle station: ' + err.message);
+      toastError('Failed to toggle station: ' + err.message);
     }
   };
 
   return (
     <div className="flex flex-col w-full">
-      {/* Toast Notification */}
-      {notification && (
-        <div
-          className={`fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded shadow-lg flex items-center gap-2 border text-[13px] font-medium transition-all ${
-            notification.type === 'success'
-              ? 'bg-emerald-900 text-emerald-50 border-emerald-700'
-              : 'bg-red-900 text-red-50 border-red-700'
-          }`}
-        >
-          <span className="material-symbols-outlined text-[18px]">
-            {notification.type === 'success' ? 'check_circle' : 'error'}
-          </span>
-          <span>{notification.msg}</span>
-        </div>
-      )}
-
       {/* Header & Sub-Navigation */}
       <div className="flex flex-col md:flex-row md:items-end justify-between pb-5 border-b border-outline-variant/30 gap-4 mb-6">
         <div>

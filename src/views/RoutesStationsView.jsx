@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { dataStore } from '../lib/dataStore';
 import Modal from '../components/Modal';
 
 export default function RoutesStationsView() {
   const { currentUser, isManager, triggerRefresh } = useAuth();
+  const { error: toastError, success: toastSuccess } = useToast();
   const filteredData = dataStore.getFilteredData(currentUser);
 
   const [activeSubTab, setActiveSubTab] = useState('routes'); // 'routes' | 'stations'
@@ -39,11 +41,11 @@ export default function RoutesStationsView() {
   const handleCreateRoute = async (e) => {
     e.preventDefault();
     if (!isManager) {
-      alert('Access Denied: Only Operations Managers can create distribution routes.');
+      toastError('Access Denied: Only Operations Managers can create distribution routes.');
       return;
     }
     if (!routeForm.route_code || !routeForm.name) {
-      alert('Route code and name are required.');
+      toastError('Route code and name are required.');
       return;
     }
     try {
@@ -51,9 +53,9 @@ export default function RoutesStationsView() {
       setIsRouteModalOpen(false);
       setRouteForm({ route_code: '', name: '', description: '' });
       triggerRefresh();
-      alert('Distribution corridor created successfully!');
+      toastSuccess('Distribution corridor created successfully!');
     } catch (err) {
-      alert('Failed to create route: ' + err.message);
+      toastError('Failed to create route: ' + err.message);
     }
   };
 
@@ -70,26 +72,26 @@ export default function RoutesStationsView() {
   const handleUpdateRoute = async (e) => {
     e.preventDefault();
     if (!isManager) {
-      alert('Access Denied: Only Operations Managers can edit distribution routes.');
+      toastError('Access Denied: Only Operations Managers can edit distribution routes.');
       return;
     }
     if (!editRouteForm.route_code || !editRouteForm.name) {
-      alert('Route code and corridor name are required.');
+      toastError('Route code and corridor name are required.');
       return;
     }
     try {
       await dataStore.updateRoute(editRouteForm.id, editRouteForm, currentUser);
       setIsEditRouteModalOpen(false);
       triggerRefresh();
-      alert('Distribution corridor updated successfully!');
+      toastSuccess('Distribution corridor updated successfully!');
     } catch (err) {
-      alert('Failed to update route: ' + err.message);
+      toastError('Failed to update route: ' + err.message);
     }
   };
 
   const handleDeleteRoute = (rt) => {
     if (!isManager) {
-      alert('Access Denied: Only Operations Managers can delete distribution routes.');
+      toastError('Access Denied: Only Operations Managers can delete distribution routes.');
       return;
     }
     setRouteToDelete(rt);
@@ -97,19 +99,20 @@ export default function RoutesStationsView() {
 
   const handleConfirmDeleteRoute = async () => {
     if (!routeToDelete) return;
+    const deletedName = routeToDelete.name;
     try {
       await dataStore.deleteRoute(routeToDelete.id, currentUser);
       setRouteToDelete(null);
       triggerRefresh();
-      alert(`Distribution corridor "${routeToDelete.name}" deleted successfully.`);
+      toastSuccess(`Distribution corridor "${deletedName}" deleted successfully.`);
     } catch (err) {
-      alert('Cannot delete route: ' + err.message);
+      toastError('Cannot delete route: ' + err.message);
     }
   };
 
   const handleOpenStationModal = () => {
     if (!isManager) {
-      alert('Access Denied: Only Operations Managers can add dispensing stations.');
+      toastError('Access Denied: Only Operations Managers can add dispensing stations.');
       return;
     }
     setStationForm({
@@ -127,20 +130,20 @@ export default function RoutesStationsView() {
   const handleCreateStation = async (e) => {
     e.preventDefault();
     if (!isManager) {
-      alert('Access Denied: Only Operations Managers can register dispensing stations.');
+      toastError('Access Denied: Only Operations Managers can register dispensing stations.');
       return;
     }
     if (!stationForm.station_code || !stationForm.name || !stationForm.route_id || !stationForm.customer_id) {
-      alert('Station code, name, route, and customer are required.');
+      toastError('Station code, name, route, and customer are required.');
       return;
     }
     try {
       await dataStore.createStation(stationForm, currentUser);
       setIsStationModalOpen(false);
       triggerRefresh();
-      alert('Dispensing station registered successfully!');
+      toastSuccess('Dispensing station registered successfully!');
     } catch (err) {
-      alert('Failed to create station: ' + err.message);
+      toastError('Failed to create station: ' + err.message);
     }
   };
 

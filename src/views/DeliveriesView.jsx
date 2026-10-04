@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { dataStore } from '../lib/dataStore';
 import Modal from '../components/Modal';
 
 export default function DeliveriesView() {
   const { currentUser, isManager, triggerRefresh } = useAuth();
+  const { error: toastError, success: toastSuccess } = useToast();
   const filteredData = dataStore.getFilteredData(currentUser);
 
   // Tabs: 'dispatch' | 'manifest' | 'factory' | 'vehicle_fuel' | 'station_invoice'
@@ -91,11 +93,11 @@ export default function DeliveriesView() {
   const handleCreateProduct = async (e) => {
     e.preventDefault();
     if (!isManager) {
-      alert('Only Operations Managers can add new fuel grades.');
+      toastError('Only Operations Managers can add new fuel grades.');
       return;
     }
     if (!productForm.product_code || !productForm.name || !productForm.current_unit_price) {
-      alert('Product code, name, and unit price are required.');
+      toastError('Product code, name, and unit price are required.');
       return;
     }
     try {
@@ -103,16 +105,16 @@ export default function DeliveriesView() {
       setIsProductModalOpen(false);
       setProductForm({ product_code: '', name: '', current_unit_price: '', unit_of_measure: 'Liters' });
       triggerRefresh();
-      alert('New fuel grade registered successfully!');
+      toastSuccess('New fuel grade registered successfully!');
     } catch (err) {
-      alert('Failed to create fuel product: ' + err.message);
+      toastError('Failed to create fuel product: ' + err.message);
     }
   };
 
   const handleDispatchSubmit = async (e) => {
     e.preventDefault();
     if (!quantity || quantity <= 0) {
-      alert('Please enter a valid quantity.');
+      toastError('Please enter a valid quantity.');
       return;
     }
 
@@ -136,18 +138,18 @@ export default function DeliveriesView() {
         currentUser
       );
 
-      alert(`Delivery manifest successfully recorded! Customer balance debited: ₹${Math.round(grossAmount).toLocaleString('en-IN')}`);
+      toastSuccess(`Delivery manifest successfully recorded! Customer balance debited: ₹${Math.round(grossAmount).toLocaleString('en-IN')}`);
       triggerRefresh();
       setActiveTabMode('manifest');
     } catch (err) {
-      alert('Failed to record delivery: ' + err.message);
+      toastError('Failed to record delivery: ' + err.message);
     }
   };
 
   const handleFactoryIntakeSubmit = async (e) => {
     e.preventDefault();
     if (!factoryForm.quantity_liters || Number(factoryForm.quantity_liters) <= 0) {
-      alert('Please enter valid fuel quantity in liters.');
+      toastError('Please enter valid fuel quantity in liters.');
       return;
     }
 
@@ -155,16 +157,16 @@ export default function DeliveriesView() {
       await dataStore.recordFactoryFuelIntake(factoryForm, currentUser);
       setIsFactoryModalOpen(false);
       triggerRefresh();
-      alert('Factory fuel intake logged successfully with attached invoice!');
+      toastSuccess('Factory fuel intake logged successfully with attached invoice!');
     } catch (err) {
-      alert('Failed to log factory intake: ' + err.message);
+      toastError('Failed to log factory intake: ' + err.message);
     }
   };
 
   const handleVehicleFuelSubmit = async (e) => {
     e.preventDefault();
     if (!vehicleFuelForm.fuel_liters || Number(vehicleFuelForm.fuel_liters) <= 0) {
-      alert('Please enter fuel liters consumed.');
+      toastError('Please enter fuel liters consumed.');
       return;
     }
 
@@ -172,9 +174,9 @@ export default function DeliveriesView() {
       await dataStore.recordVehicleConsumption(vehicleFuelForm, currentUser);
       setIsVehicleFuelModalOpen(false);
       triggerRefresh();
-      alert('Vehicle fuel consumption logged successfully!');
+      toastSuccess('Vehicle fuel consumption logged successfully!');
     } catch (err) {
-      alert('Failed to log vehicle fuel: ' + err.message);
+      toastError('Failed to log vehicle fuel: ' + err.message);
     }
   };
 

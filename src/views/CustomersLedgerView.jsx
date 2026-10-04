@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { dataStore } from '../lib/dataStore';
 import Modal from '../components/Modal';
 
 export default function CustomersLedgerView() {
   const { currentUser, isManager, triggerRefresh } = useAuth();
+  const { error: toastError, success: toastSuccess } = useToast();
   const filteredData = dataStore.getFilteredData(currentUser);
   const financialSummaries = dataStore.getCustomerFinancialSummaries();
 
@@ -60,11 +62,11 @@ export default function CustomersLedgerView() {
   const handleCreateCustomer = async (e) => {
     e.preventDefault();
     if (!isManager) {
-      alert('Access Denied: Only Operations Managers are authorized to register customer accounts.');
+      toastError('Access Denied: Only Operations Managers are authorized to register customer accounts.');
       return;
     }
     if (!customerForm.customer_code || !customerForm.name) {
-      alert('Customer code and name are required.');
+      toastError('Customer code and name are required.');
       return;
     }
     try {
@@ -81,9 +83,9 @@ export default function CustomersLedgerView() {
         credit_limit: '5000000',
       });
       triggerRefresh();
-      alert('Customer registered successfully!');
+      toastSuccess('Customer registered successfully!');
     } catch (err) {
-      alert('Failed to create customer: ' + err.message);
+      toastError('Failed to create customer: ' + err.message);
     }
   };
 
@@ -106,26 +108,26 @@ export default function CustomersLedgerView() {
   const handleUpdateCustomer = async (e) => {
     e.preventDefault();
     if (!isManager) {
-      alert('Access Denied: Only Operations Managers can edit customer accounts.');
+      toastError('Access Denied: Only Operations Managers can edit customer accounts.');
       return;
     }
     if (!editCustomerForm.customer_code || !editCustomerForm.name) {
-      alert('Customer code and entity name are required.');
+      toastError('Customer code and entity name are required.');
       return;
     }
     try {
       await dataStore.updateCustomer(editCustomerForm.id, editCustomerForm, currentUser);
       setIsEditCustomerModalOpen(false);
       triggerRefresh();
-      alert('Customer account updated successfully!');
+      toastSuccess('Customer account updated successfully!');
     } catch (err) {
-      alert('Failed to update customer: ' + err.message);
+      toastError('Failed to update customer: ' + err.message);
     }
   };
 
   const handleDeleteCustomer = (cust) => {
     if (!isManager) {
-      alert('Access Denied: Only Operations Managers can delete customer accounts.');
+      toastError('Access Denied: Only Operations Managers can delete customer accounts.');
       return;
     }
     setCustomerToDelete(cust.raw || cust);
@@ -133,13 +135,14 @@ export default function CustomersLedgerView() {
 
   const handleConfirmDeleteCustomer = async () => {
     if (!customerToDelete) return;
+    const deletedName = customerToDelete.name;
     try {
       await dataStore.deleteCustomer(customerToDelete.id, currentUser);
       setCustomerToDelete(null);
       triggerRefresh();
-      alert(`Customer "${customerToDelete.name}" deleted successfully.`);
+      toastSuccess(`Customer "${deletedName}" deleted successfully.`);
     } catch (err) {
-      alert('Cannot delete customer: ' + err.message);
+      toastError('Cannot delete customer: ' + err.message);
     }
   };
 
@@ -147,7 +150,7 @@ export default function CustomersLedgerView() {
   const handleRecordPayment = async (e) => {
     e.preventDefault();
     if (!selectedCustomerForAction || !paymentAmount || Number(paymentAmount) <= 0) {
-      alert('Please enter a valid payment amount.');
+      toastError('Please enter a valid payment amount.');
       return;
     }
     try {
@@ -162,9 +165,9 @@ export default function CustomersLedgerView() {
       setPaymentAmount('');
       setPaymentNotes('');
       triggerRefresh();
-      alert('Payment successfully credited to customer ledger in Supabase!');
+      toastSuccess('Payment successfully credited to customer ledger in Supabase!');
     } catch (err) {
-      alert('Failed to record payment: ' + err.message);
+      toastError('Failed to record payment: ' + err.message);
     }
   };
 
@@ -172,7 +175,7 @@ export default function CustomersLedgerView() {
   const handleRequestAdvance = async (e) => {
     e.preventDefault();
     if (!selectedCustomerForAction || !advanceAmount || Number(advanceAmount) <= 0) {
-      alert('Please enter a valid advance amount.');
+      toastError('Please enter a valid advance amount.');
       return;
     }
     try {
@@ -191,9 +194,9 @@ export default function CustomersLedgerView() {
       setAdvanceRef('');
       setAdvanceNotes('');
       triggerRefresh();
-      alert('Customer advance request logged! Under governance rules, this advance will affect customer balance ONLY AFTER confirmation from the Operations Manager.');
+      toastSuccess('Customer advance request logged! Under governance rules, this advance will affect customer balance ONLY AFTER confirmation from the Operations Manager.');
     } catch (err) {
-      alert('Failed to submit advance: ' + err.message);
+      toastError('Failed to submit advance: ' + err.message);
     }
   };
 

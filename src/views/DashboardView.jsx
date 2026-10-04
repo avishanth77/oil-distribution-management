@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 import { dataStore } from '../lib/dataStore';
 import Modal from '../components/Modal';
 
 export default function DashboardView({ onNavigate }) {
   const { currentUser, isManager, triggerRefresh } = useAuth();
+  const { error: toastError } = useToast();
   const filteredData = dataStore.getFilteredData(currentUser);
   const financialSummaries = dataStore.getCustomerFinancialSummaries();
 
@@ -51,7 +53,7 @@ export default function DashboardView({ onNavigate }) {
       setSelectedAdvance(null);
       triggerRefresh();
     } catch (err) {
-      alert('Failed to process advance: ' + err.message);
+      toastError('Failed to process advance: ' + err.message);
     }
   };
 
